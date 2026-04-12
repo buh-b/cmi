@@ -612,18 +612,30 @@ function DayEventsModal({ ctx, date }) {
           </div>
           <button className="close-btn" onClick={closeModal}>✕</button>
         </div>
+
+        {/* ── + Add Event bar at the top ── */}
+        <div style={{padding:"0 24px 0 24px"}}>
+          <button
+            className="btn btn-primary"
+            style={{width:"100%",borderRadius:10,padding:"10px 0",fontSize:14,fontWeight:700,marginBottom:4,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}
+            onClick={()=>{closeModal();setTimeout(()=>setModal({type:"create-event",data:{date}}),50);}}>
+            <span style={{fontSize:18}}>＋</span> Add Event on {date.toLocaleDateString("en-PH",{month:"short",day:"numeric"})}
+          </button>
+        </div>
+
         <div className="modal-body">
           {dayEvts.length === 0
-            ? <div className="empty-state" style={{padding:"30px 0"}}>
+            ? <div className="empty-state" style={{padding:"24px 0"}}>
                 <div className="empty-icon">✨</div>
                 <div className="empty-title">No events this day</div>
+                <div style={{fontSize:13,color:"var(--text3)"}}>Tap the button above to add one!</div>
               </div>
             : dayEvts.map(e => {
                 const cal = cals.find(c=>c.id===e.calendarId);
                 const evColor = cal?.color || "var(--accent)";
                 return (
                   <div key={e.id} className="event-item"
-                    style={{borderLeft:`3px solid ${evColor}`,paddingLeft:14,marginBottom:4,borderRadius:"0 8px 8px 0"}}
+                    style={{borderLeft:`3px solid ${evColor}`,paddingLeft:14,marginBottom:4,borderRadius:"0 8px 8px 0",cursor:"pointer"}}
                     onClick={()=>{closeModal();setTimeout(()=>setModal({type:"event-detail",data:e}),50);}}>
                     <div className="event-dot" style={{background:evColor}} />
                     <div className="event-info">
@@ -640,10 +652,6 @@ function DayEventsModal({ ctx, date }) {
           }
         </div>
         <div className="modal-footer">
-          <button className="btn btn-primary btn-sm"
-            onClick={()=>{closeModal();setTimeout(()=>setModal({type:"create-event",data:{date}}),50);}}>
-            + Add Event
-          </button>
           <button className="btn btn-ghost" onClick={closeModal}>Close</button>
         </div>
       </div>
@@ -1334,7 +1342,7 @@ function CalendarPage({ ctx }) {
             return (
               <div key={i}
                 className={`cal-cell${cell.isOtherMonth?" other-month":""}${isToday?" today":""}`}
-                onClick={() => setModal({ type:"create-event", data:{ date:cell.date } })}>
+                onClick={() => setModal({ type:"day-events", data:{ date:cell.date } })}>
                 <div className="cal-date">{cell.date.getDate()}</div>
                 {show.map(e => {
                   const cal = cals.find(c => c.id === e.calendarId);
