@@ -183,17 +183,18 @@ function App() {
   useEffect(() => {
   const saved = loadSession();
   if (!saved) { setAuthLoading(false); return; }
-  apiCall("/users.v1.UserService/Get", {}, saved)
-    .then(profile => {
-      const u = buildUser(profile, saved);
-      setCurrentUser(u);
-      setSessionId(saved);
-      loadAllData(saved, saved);
-    })
-    .catch((e) => {
-      if (e.status === 401 || e.status === 403) clearSession();
-    })
-    .finally(() => setAuthLoading(false));
+apiCall("/users.v1.UserService/GetSelf", {}, saved)
+  .then(self => apiCall("/users.v1.UserService/Get", { id: self.id }, saved))
+  .then(profile => {
+    const u = buildUser(profile, saved);
+    setCurrentUser(u);
+    setSessionId(saved);
+    loadAllData(saved, saved);
+  })
+  .catch((e) => {
+    if (e.status === 401 || e.status === 403) clearSession();
+  })
+  .finally(() => setAuthLoading(false));
 }, []);
 
   const handleLogin = useCallback((user, sid) => {
