@@ -1,7 +1,7 @@
 // ============================================================
 //  app.jsx — Core shell: shared helpers, auth, layout,
 //            dashboard, settings, and app entry point.
-//
+// skibidi
 //  FILE MAP:
 //    app.jsx              ← you are here (core shell + shared utils)
 //    groupCalendar.jsx    ← Feature: Group Calendar Management
