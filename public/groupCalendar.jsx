@@ -21,6 +21,7 @@ function CalendarsPage({ ctx }) {
   } = ctx;
 
   const [tab, setTab] = React.useState("all");
+  const [confirmDlg, setConfirmDlg] = React.useState(null);
   const cals     = myCalendars();
   const filtered = tab === "all"
     ? cals
@@ -29,9 +30,8 @@ function CalendarsPage({ ctx }) {
       : cals.filter(c => !c.isOwner);
 
   // Sub-feature: Delete Calendar
-  async function handleDelete(cal) {
+  async function doDelete(cal) {
     if (!cal.isOwner) { showToast("You don't own this.", "error"); return; }
-    if (!window.confirm(`Delete "${cal.name}"? This cannot be undone.`)) return;
     try {
       await calApi("DeleteCalendar", { calendarId: cal.id }, sessionId);
       removeCalendarId(currentUser.id, cal.id);
@@ -39,6 +39,15 @@ function CalendarsPage({ ctx }) {
       showToast(`Deleted "${cal.name}"`);
       refreshCalendars();
     } catch(e) { showToast(e.message || "Failed to delete.", "error"); }
+  }
+
+  function handleDelete(cal) {
+    if (!cal.isOwner) { showToast("You don't own this.", "error"); return; }
+    setConfirmDlg({
+      message: `Delete "${cal.name}"?`,
+      danger: true,
+      onConfirm: () => doDelete(cal),
+    });
   }
 
   // Sub-feature: Calendar Color Picker — persisted to server via UpdateCalendarMetadata
@@ -56,6 +65,12 @@ function CalendarsPage({ ctx }) {
 
   return (
     <div>
+      {confirmDlg && (
+        <ConfirmDialog
+          {...confirmDlg}
+          onClose={() => setConfirmDlg(null)}
+        />
+      )}
       <div className="tabs">
         {[["all","All"],["owned","My Calendars"],["subscribed","Joined"]].map(([t,l]) => (
           <div key={t} className={`tab${tab===t?" active":""}`} onClick={() => setTab(t)}>{l}</div>

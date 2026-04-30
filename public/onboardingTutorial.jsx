@@ -29,12 +29,99 @@
 //    "nav-calendar"        — Calendar View sidebar nav item
 //    "nav-events"          — My Events sidebar nav item
 //    "nav-tasks"           — Task Tracker sidebar nav item
+//    "nav-organizations"   — Organizations sidebar nav item
+//    "nav-ai"              — AI Tools sidebar nav item
 //    "topbar-refresh"      — Refresh icon button in the topbar
 //
 //  LOAD ORDER — add to index.html AFTER monthProgress.jsx,
 //  BEFORE calendarView.jsx:
 //    <script type="text/babel" src="onboardingTutorial.jsx"></script>
 // ============================================================
+
+// ─── CONFIRM DIALOG ──────────────────────────────────────────────
+//  Global reusable confirmation modal — replaces window.confirm().
+//
+//  Usage (inside any component):
+//    const [confirm, setConfirm] = React.useState(null);
+//    // To show:
+//    setConfirm({ message: "Delete this?", onConfirm: () => doDelete(), danger: true });
+//    // Render anywhere in your JSX:
+//    {confirm && <ConfirmDialog {...confirm} onClose={() => setConfirm(null)} />}
+//
+//  Props:
+//    message    {string}   — question text shown to the user
+//    onConfirm  {fn}       — called when the user clicks the confirm button
+//    onClose    {fn}       — called on cancel or after confirm
+//    danger     {bool}     — if true, confirm button uses red/danger styling
+//    confirmLabel {string} — optional label override for the confirm button
+function ConfirmDialog({ message, onConfirm, onClose, danger = false, confirmLabel }) {
+  function handleConfirm() {
+    onClose();
+    onConfirm();
+  }
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 20000,
+        background: "rgba(0,0,0,0.60)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "var(--surface)",
+          border: "1.5px solid var(--border)",
+          borderRadius: 16,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.55)",
+          width: 340,
+          overflow: "hidden",
+        }}
+      >
+        {/* Top accent bar */}
+        <div style={{
+          height: 3,
+          background: danger
+            ? "linear-gradient(90deg, var(--red), #ff6b6b)"
+            : "linear-gradient(90deg, var(--accent), var(--accent2))",
+        }} />
+
+        <div style={{ padding: "24px 24px 8px" }}>
+          {/* Icon */}
+          <div style={{ fontSize: 28, marginBottom: 12, textAlign: "center" }}>
+            {danger ? "⚠️" : "❓"}
+          </div>
+          {/* Message */}
+          <div style={{
+            fontSize: 14, fontWeight: 600, color: "var(--text)",
+            lineHeight: 1.6, textAlign: "center", marginBottom: 6,
+          }}>
+            {message}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--text3)", textAlign: "center", marginBottom: 20 }}>
+            {danger ? "This action cannot be undone." : "Please confirm to continue."}
+          </div>
+        </div>
+
+        <div style={{
+          display: "flex", gap: 10, padding: "0 24px 24px", justifyContent: "center",
+        }}>
+          <button className="btn btn-ghost" style={{ minWidth: 90 }} onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className={danger ? "btn btn-danger" : "btn btn-primary"}
+            style={{ minWidth: 110 }}
+            onClick={handleConfirm}
+          >
+            {confirmLabel || (danger ? "Yes, Delete" : "Confirm")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── TUTORIAL STEPS DATA ─────────────────────────────────────────
 //  target   — CSS selector for the element to spotlight (null = centred card)
@@ -53,21 +140,27 @@ const TUTORIAL_STEPS = [
     position: "left",
   },
   {
-    title:    "My Calendars — Start Here",
-    body:     "Create your first calendar before anything else. Every event and task you create needs to live inside a calendar you own.",
-    target:   "[data-tutorial='nav-calendars']",
-    position: "right",
-  },
-  {
     title:    "Calendar View",
     body:     "See all your events on a monthly grid. Tap any day to view or add events. Use the colour pills to filter by calendar.",
     target:   "[data-tutorial='nav-calendar']",
     position: "right",
   },
   {
-    title:    "My Events",
+    title:    "Events List",
     body:     "A flat, searchable list of every event across all your calendars — upcoming and past, filterable by importance.",
     target:   "[data-tutorial='nav-events']",
+    position: "right",
+  },
+  {
+    title:    "Manage Calendars — Start Here",
+    body:     "Create your first calendar before anything else. Every event and task you create needs to live inside a calendar you own.",
+    target:   "[data-tutorial='nav-calendars']",
+    position: "right",
+  },
+  {
+    title:    "Organizations",
+    body:     "Join or create organizations — like a department or club. Owners can push shared calendars to all members so everyone stays in sync automatically.",
+    target:   "[data-tutorial='nav-organizations']",
     position: "right",
   },
   {
@@ -77,8 +170,14 @@ const TUTORIAL_STEPS = [
     position: "right",
   },
   {
+    title:    "AI Tools ✨",
+    body:     "Three AI-powered tools in one place: describe events in plain text and let AI create them for you, analyze your calendar for insights, or extract text from a photo of a schedule using OCR.",
+    target:   "[data-tutorial='nav-ai']",
+    position: "right",
+  },
+  {
     title:    "You're all set! 🚀",
-    body:     "Head to My Calendars first and create a calendar. Once that's done, events and tasks will be ready to go.",
+    body:     "Start by heading to Manage Calendars and creating your first calendar — everything else builds from there.",
     target:   null,
     position: "center",
   },
@@ -197,19 +296,19 @@ function OnboardingTutorial({ userId, userName, onDismiss }) {
     if (side === "right") {
       arrowLeft = r.right + SPOT_PAD + 2;
       arrowTop  = cy - ARROW_SIZE / 2;
-      arrowDir  = "right";
+      arrowDir  = "left";   // tooltip is RIGHT of element → arrow points LEFT toward the element
     } else if (side === "left") {
       arrowLeft = r.left - SPOT_PAD - 2 - ARROW_SIZE;
       arrowTop  = cy - ARROW_SIZE / 2;
-      arrowDir  = "left";
+      arrowDir  = "right";   // tooltip is LEFT of element → arrow points RIGHT toward the element
     } else if (side === "bottom") {
       arrowLeft = cx - ARROW_SIZE / 2;
       arrowTop  = r.bottom + SPOT_PAD + 2;
-      arrowDir  = "down";
+      arrowDir  = "up";   // tooltip is BELOW element → arrow points UP toward the element
     } else {
       arrowLeft = cx - ARROW_SIZE / 2;
       arrowTop  = r.top - SPOT_PAD - 2 - ARROW_SIZE;
-      arrowDir  = "up";
+      arrowDir  = "down";   // tooltip is ABOVE element → arrow points DOWN toward the element
     }
 
     setLayout({ spotX, spotY, spotW, spotH, tipTop, tipLeft, arrowTop, arrowLeft, arrowDir });

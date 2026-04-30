@@ -184,6 +184,7 @@ function TaskTrackerPage({ ctx }) {
   const [formError,   setFormError]   = React.useState("");
   const [collapsed,   setCollapsed]   = React.useState({});
   const [migrating,   setMigrating]   = React.useState(false);
+  const [confirmDlg,  setConfirmDlg]  = React.useState(null);
   const checkInputRef = React.useRef(null);
   const checkScrollRefs = React.useRef({});
 
@@ -343,6 +344,14 @@ function TaskTrackerPage({ ctx }) {
     } catch(e) { showToast("Failed to delete.","error"); }
   }
 
+  function confirmDeleteTask(taskId) {
+    setConfirmDlg({
+      message: "Delete this task?",
+      danger: true,
+      onConfirm: () => deleteTask(taskId),
+    });
+  }
+
   // ─── TASK CARD ──────────────────────────────────────────────────
   function TaskCard({ task }) {
     const checkDone  = task.checklist?.filter(i=>i.checked).length||0;
@@ -374,7 +383,7 @@ function TaskTrackerPage({ ctx }) {
           <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0, marginLeft:4 }}>
             <button title="Duplicate" className="task-btn-edit" onClick={()=>duplicateTask(task)} style={{ fontSize:11 }}>⧉</button>
             <button className="task-btn-edit" onClick={()=>openEdit(task)}>Edit</button>
-            <button className="task-btn-del" onClick={()=>deleteTask(task.id)}>✕</button>
+            <button className="task-btn-del" onClick={()=>confirmDeleteTask(task.id)}>✕</button>
           </div>
         </div>
 
@@ -500,6 +509,12 @@ function TaskTrackerPage({ ctx }) {
 
   return (
     <div>
+      {confirmDlg && (
+        <ConfirmDialog
+          {...confirmDlg}
+          onClose={() => setConfirmDlg(null)}
+        />
+      )}
       {/* Migration banner */}
       {migrating && (
         <div className="card" style={{ marginBottom:16, border:"1px solid rgba(99,102,241,0.4)", background:"rgba(99,102,241,0.06)" }}>
