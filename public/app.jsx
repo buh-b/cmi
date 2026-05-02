@@ -469,7 +469,6 @@ function App() {
           {page==="ai"             && <AIServicesPage    ctx={ctx} />}
           {page==="settings"       && <SettingsPage      ctx={ctx} />}
         </div>
-        <BottomNav page={page} setPage={navigateTo} />
       </div>
       {modal && <ModalRouter modal={modal} ctx={ctx} />}
       {/* ── Onboarding tutorial — only renders for brand-new users ── */}
@@ -484,33 +483,13 @@ function App() {
   );
 }
 
-// ─── BOTTOM NAV ───────────────────────────────────────────────────────────────
-function BottomNav({ page, setPage }) {
-  const items = [
-    {id:"dashboard", icon:"⊞",  label:"Home"},
-    {id:"calendar",  icon:"📅", label:"Calendar"},
-    {id:"events",    icon:"🗓",  label:"Events"},
-    {id:"tasks",     icon:"✅", label:"Tasks"},
-  ];
-  return (
-    <div className="bottom-nav">
-      {items.map(item=>(
-        <div key={item.id} className={`bottom-nav-item${page===item.id?" active":""}`} onClick={()=>setPage(item.id)}>
-          <span className="bnav-icon">{item.icon}</span>
-          <span>{item.label}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ─── TOAST ────────────────────────────────────────────────────────────────────
 function Toast({ toast }) {
   if (!toast) return null;
   const bg=toast.type==="error"?"rgba(248,113,113,0.15)":"rgba(52,211,153,0.15)";
   const border=toast.type==="error"?"rgba(248,113,113,0.4)":"rgba(52,211,153,0.4)";
   const color=toast.type==="error"?"#f87171":"#34d399";
-  return <div style={{position:"fixed",bottom:80,right:16,zIndex:999,background:bg,border:`1px solid ${border}`,color,borderRadius:12,padding:"13px 20px",fontSize:14,fontWeight:600,boxShadow:"0 8px 32px rgba(0,0,0,0.4)",maxWidth:300,fontFamily:"DM Sans,sans-serif"}}>{toast.msg}</div>;
+  return <div style={{position:"fixed",bottom:24,right:16,zIndex:999,background:bg,border:`1px solid ${border}`,color,borderRadius:12,padding:"13px 20px",fontSize:14,fontWeight:600,boxShadow:"0 8px 32px rgba(0,0,0,0.4)",maxWidth:300,fontFamily:"DM Sans,sans-serif"}}>{toast.msg}</div>;
 }
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────

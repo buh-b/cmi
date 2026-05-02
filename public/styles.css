@@ -439,36 +439,6 @@ body { font-family: var(--font-body); background: var(--bg); color: var(--text);
   /* Tabs scroll */
   .tabs { overflow-x:auto; }
   /* Bottom nav bar */
-  .bottom-nav { display:flex !important; }
-  /* Hide sidebar nav labels on very small screens, show bottom nav */
-}
-
-/* Bottom navigation bar for mobile */
-.bottom-nav {
-  display:none;
-  position:fixed;
-  bottom:0; left:0; right:0;
-  background:var(--surface);
-  border-top:1px solid var(--border);
-  z-index:40;
-  padding:6px 0 calc(6px + env(safe-area-inset-bottom));
-  justify-content:space-around;
-}
-.bottom-nav-item {
-  display:flex; flex-direction:column; align-items:center;
-  gap:3px; cursor:pointer; padding:6px 12px;
-  color:var(--text3); font-size:10px; font-weight:600;
-  border-radius:10px; transition:var(--transition);
-  position:relative;
-}
-.bottom-nav-item.active { color:var(--accent2); }
-.bottom-nav-item .bnav-icon { font-size:20px; }
-.bottom-nav-badge {
-  position:absolute; top:2px; right:6px;
-  background:var(--red); color:#fff;
-  border-radius:50%; width:14px; height:14px;
-  font-size:9px; display:flex; align-items:center; justify-content:center;
-  font-weight:700;
 }
 
 /* Extra padding at bottom on mobile so content isn't under bottom nav */
