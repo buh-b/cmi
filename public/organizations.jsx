@@ -536,7 +536,17 @@ function ManageOrgModal({ ctx, orgId, org }) {
     setMembersLoading(true);
     try {
       const res = await orgMemApi("GetOrganizationMembers", { organizationId: Number(orgId) }, sessionId);
-      setMembers(res.members || res.usernames || []);
+      const ids = res.memberUserIds || [];
+      const resolved = await Promise.all(ids.map(async (uid) => {
+        try {
+          const u = await apiCall("/users.v2.UserService/GetUser", { userId: uid }, sessionId);
+          const name = [u.firstName, u.middleName, u.lastName].filter(Boolean).join(" ");
+          return { id: uid, name: name || `User #${uid}` };
+        } catch(e) {
+          return { id: uid, name: `User #${uid}` };
+        }
+      }));
+      setMembers(resolved);
     } catch(e) {
       setMembers([]);
     } finally {
@@ -768,9 +778,9 @@ function ManageOrgModal({ ctx, orgId, org }) {
               ) : (
                 <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
                   {members.map((m, i) => {
-                    const username = typeof m === "string" ? m : (m.username || m.name || String(m));
+                    const name = m.name || String(m);
                     return (
-                      <div key={i} style={{
+                      <div key={m.id || i} style={{
                         display:"flex", alignItems:"center", gap:10,
                         padding:"10px 14px", borderRadius:10,
                         background:"var(--surface2)", border:"1px solid var(--border)",
@@ -783,10 +793,10 @@ function ManageOrgModal({ ctx, orgId, org }) {
                           fontSize:12, fontWeight:700, color: PALETTE[i % PALETTE.length],
                           flexShrink:0,
                         }}>
-                          {username[0]?.toUpperCase() || "?"}
+                          {name[0]?.toUpperCase() || "?"}
                         </div>
                         <div style={{ fontSize:14, fontWeight:600, color:"var(--text)" }}>
-                          {username}
+                          {name}
                         </div>
                       </div>
                     );
@@ -1102,7 +1112,17 @@ function OrgDetailModal({ ctx, orgId, org }) {
     setMembersLoading(true);
     try {
       const res = await orgMemApi("GetOrganizationMembers", { organizationId: Number(orgId) }, sessionId);
-      setMembers(res.members || res.usernames || []);
+      const ids = res.memberUserIds || [];
+      const resolved = await Promise.all(ids.map(async (uid) => {
+        try {
+          const u = await apiCall("/users.v2.UserService/GetUser", { userId: uid }, sessionId);
+          const name = [u.firstName, u.middleName, u.lastName].filter(Boolean).join(" ");
+          return { id: uid, name: name || `User #${uid}` };
+        } catch(e) {
+          return { id: uid, name: `User #${uid}` };
+        }
+      }));
+      setMembers(resolved);
     } catch(e) {
       setMembers([]);
     } finally {
@@ -1231,7 +1251,7 @@ function OrgDetailModal({ ctx, orgId, org }) {
               ) : (
                 <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
                   {members.map((m, i) => {
-                    const username = typeof m === "string" ? m : (m.username || m.name || String(m));
+                    const username = m.name || String(m.id || m);
                     return (
                       <div key={i} style={{
                         display:"flex", alignItems:"center", gap:10,
@@ -1281,7 +1301,17 @@ function OrgMembersModal({ ctx, orgId, org }) {
       setLoading(true);
       try {
         const res = await orgMemApi("GetOrganizationMembers", { organizationId: Number(orgId) }, sessionId);
-        setMembers(res.members || res.usernames || []);
+        const ids = res.memberUserIds || [];
+        const resolved = await Promise.all(ids.map(async (uid) => {
+          try {
+            const u = await apiCall("/users.v2.UserService/GetUser", { userId: uid }, sessionId);
+            const name = [u.firstName, u.middleName, u.lastName].filter(Boolean).join(" ");
+            return { id: uid, name: name || `User #${uid}` };
+          } catch(e) {
+            return { id: uid, name: `User #${uid}` };
+          }
+        }));
+        setMembers(resolved);
       } catch(e) {
         setMembers([]);
       } finally {
@@ -1326,7 +1356,7 @@ function OrgMembersModal({ ctx, orgId, org }) {
                 {members.length} member{members.length !== 1 ? "s" : ""}
               </div>
               {members.map((m, i) => {
-                const username = typeof m === "string" ? m : (m.username || m.name || String(m));
+                const username = m.name || String(m.id || m);
                 return (
                   <div key={i} style={{
                     display:"flex", alignItems:"center", gap:10,

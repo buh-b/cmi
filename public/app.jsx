@@ -239,91 +239,75 @@ function removeCalendarId(userId, calId) {
 }
 
 // ✅ Fetch calendars + events from v2 API
-// AFTER
+// Uses CalendarService/GetCalendars which returns owned + org-shared calendars in one call.
+// No UserProfileService calls — backend guy said to remove them all.
 async function fetchAllCalendars(sid, calPrefs, userId) {
-  // Always fetch owned IDs from server — this fixes cross-device/cross-browser sync
-  try {
-    const res = await apiCall("/users.v2.UserProfileService/GetUserOwnedCalendars", {}, sid);
-    const serverOwned = (res.calendarIds || []).map(strId);
-    const local = loadCalendarIds(userId);
-  const recoveredJoined = serverOwned.length > 0
-  ? [] // server only returns owned; joined must be inferred another way
-  : [];
-  // Re-hydrate joined from server: attempt GetUserJoinedCalendars if available
-  let serverJoined = [];
-try {
-  const joinedRes = await apiCall("/users.v2.UserProfileService/GetUserJoinedCalendars", {}, sid);
-  serverJoined = (joinedRes.calendarIds || []).map(strId);
-} catch(e) { /* endpoint may not exist — fall back to local */ }
-const merged = {
-  owned:  [...new Set([...serverOwned,   ...local.owned.map(strId)])],
-  joined: [...new Set([...serverJoined,  ...local.joined.map(strId)])],
-};
-    saveCalendarIds(userId, merged);
-  } catch(e) {
-    console.warn("Could not fetch owned calendars from server:", e.message);
-  }
-  const { owned: ownedIds, joined: joinedIds } = loadCalendarIds(userId);
-  const allIds = [...new Set([...ownedIds, ...joinedIds].map(strId))];
   const calendars = [], events = [];
-  await Promise.all(allIds.map(async (id) => {
-    try {
-      const calRes = await calApi("GetCalendar", { calendarId: Number(id) }, sid);
-      const isOwner = strId(calRes.ownerUserId) === strId(userId);
-      const prefs   = calPrefs[id] || {};
-      const color = prefs.color || pickColor(id);
-      calendars.push({
-        id, name: calRes.name, description: calRes.description || "",
-        isOwner, codes: [], color,
-        type: prefs.type || (isOwner ? "personal" : "shared"),
-        isOrgShared: false,
-      });
-      const calEvents = icalToEvents(calRes.ical, id);
-      calEvents.forEach(e => { e.calendarId = id; });
-      events.push(...calEvents);
-    } catch(e) {
-      if (e.status === 404 || e.status === 403) removeCalendarId(userId, id);
-    }
-  }));
 
-  // ── Fetch org-shared calendars ──────────────────────────────────
-  // Load all orgs the user belongs to, then for each org fetch the
-  // calendars its owner has shared, and append them (deduplicated).
   try {
-    const orgRes = await apiCall("/users.v2.UserProfileService/GetUserOrganizations", {}, sid);
-    const orgIds = (orgRes.organizationIds || []).map(strId);
-    const personalIds = new Set(allIds);
+    // Single call returns ALL calendar IDs this user can see:
+    // their own calendars + any org-shared calendars they're a member of
+    const res = await calApi("GetCalendars", {}, sid);
+    const allIds = (res.calendarIds || []).map(strId);
 
-    await Promise.all(orgIds.map(async (orgId) => {
+    // Save owned ones to localStorage for offline reference
+    const local = loadCalendarIds(userId);
+
+    await Promise.all(allIds.map(async (id) => {
       try {
-        const calListRes = await apiCall(
-          "/organizations.v2.OrganizationCalendarService/GetOrganizationCalendars",
-          { organizationId: orgId }, sid
-        );
-        const sharedIds = (calListRes.calendarIds || []).map(strId);
-        await Promise.all(sharedIds.map(async (id) => {
-          // Skip if already loaded as a personal/joined calendar
-          if (personalIds.has(id) || calendars.find(c => strId(c.id) === id)) return;
-          try {
-            const calRes = await calApi("GetCalendar", { calendarId: Number(id) }, sid);
-            const prefs  = calPrefs[id] || {};
-            const color  = prefs.color || pickColor(id);
-            calendars.push({
-              id, name: calRes.name, description: calRes.description || "",
-              isOwner: false, codes: [], color,
-              type: "org-shared",
-              isOrgShared: true,
-              orgId,
-            });
-            const calEvents = icalToEvents(calRes.ical, id);
-            calEvents.forEach(e => { e.calendarId = id; });
-            events.push(...calEvents);
-          } catch(e) { /* calendar inaccessible — skip silently */ }
-        }));
-      } catch(e) { /* org has no shared cals — skip */ }
+        const calRes = await calApi("GetCalendar", { calendarId: Number(id) }, sid);
+        const isOwner = strId(calRes.ownerUserId) === strId(userId);
+        const prefs   = calPrefs[id] || {};
+        const color   = prefs.color || pickColor(id);
+
+        // Track owned IDs in localStorage
+        if (isOwner && !local.owned.includes(id)) {
+          local.owned.push(id);
+        }
+
+        calendars.push({
+          id,
+          name:        calRes.name,
+          description: calRes.description || "",
+          isOwner,
+          codes:       [],
+          color,
+          type:        prefs.type || (isOwner ? "personal" : "org-shared"),
+          isOrgShared: !isOwner,
+        });
+
+        const calEvents = icalToEvents(calRes.ical, id);
+        calEvents.forEach(e => { e.calendarId = id; });
+        events.push(...calEvents);
+      } catch(e) {
+        if (e.status === 404 || e.status === 403) removeCalendarId(userId, id);
+      }
     }));
+
+    saveCalendarIds(userId, local);
   } catch(e) {
-    console.warn("Could not fetch org calendars:", e.message);
+    console.warn("Could not fetch calendars from server:", e.message);
+
+    // Fallback: try loading from localStorage if server call failed
+    const { owned: ownedIds, joined: joinedIds } = loadCalendarIds(userId);
+    const fallbackIds = [...new Set([...ownedIds, ...joinedIds].map(strId))];
+    await Promise.all(fallbackIds.map(async (id) => {
+      try {
+        const calRes = await calApi("GetCalendar", { calendarId: Number(id) }, sid);
+        const isOwner = strId(calRes.ownerUserId) === strId(userId);
+        const prefs   = calPrefs[id] || {};
+        const color   = prefs.color || pickColor(id);
+        calendars.push({
+          id, name: calRes.name, description: calRes.description || "",
+          isOwner, codes: [], color,
+          type: prefs.type || (isOwner ? "personal" : "org-shared"),
+          isOrgShared: !isOwner,
+        });
+        const calEvents = icalToEvents(calRes.ical, id);
+        calEvents.forEach(e => { e.calendarId = id; });
+        events.push(...calEvents);
+      } catch(e) {}
+    }));
   }
 
   return { calendars, events };
@@ -475,6 +459,7 @@ function App() {
           {page==="calendar"       && <CalendarPage      ctx={ctx} />}
           {page==="calendars"      && <CalendarsPage     ctx={ctx} />}
           {page==="organizations"  && <OrganizationsTab  ctx={ctx} />}
+          {page==="studyhub"        && <StudyHubTab       ctx={ctx} />}
           {page==="events"         && <EventsPage        ctx={ctx} />}
           {page==="tasks"          && <TaskTrackerPage   ctx={ctx} />}
           {page==="ai"             && <AIServicesPage    ctx={ctx} />}
@@ -734,6 +719,7 @@ function Sidebar({ page, setPage, ctx, isOpen, collapsed, setCollapsed }) {
     {id:"events",        icon:"🗓",  label:"Events List"},
     {id:"calendars",     icon:"📚", label:"Manage Calendars"},
     {id:"organizations", icon:"🏛",  label:"Organizations"},
+    {id:"studyhub",      icon:"🎓",  label:"Study Hub"},
     {id:"tasks",         icon:"✅", label:"Task Tracker"},
     {id:"ai",            icon:"✨", label:"AI Tools"},
     {id:"settings",      icon:"⚙️", label:"Settings"},
@@ -803,7 +789,7 @@ function Sidebar({ page, setPage, ctx, isOpen, collapsed, setCollapsed }) {
 
 // ─── TOPBAR ───────────────────────────────────────────────────────────────────
 function Topbar({ page, ctx, setPage, onMenuClick }) {
-  const titles = {dashboard:"Dashboard",calendar:"Calendar View",events:"Events List",calendars:"Manage Calendars",organizations:"Organizations",tasks:"Task Tracker",ai:"AI Tools",settings:"Settings",about:"About SchedU"};
+  const titles = {dashboard:"Dashboard",calendar:"Calendar View",events:"Events List",calendars:"Manage Calendars",organizations:"Organizations", studyhub:"Study Hub",tasks:"Task Tracker",ai:"AI Tools",settings:"Settings",about:"About SchedU"};
   const { dataLoading, refreshCalendars, theme, toggleTheme } = ctx;
   return (
     <div className="topbar">
@@ -1113,7 +1099,12 @@ function ModalRouter({ modal, ctx }) {
   if(type==="calendar-events")  return <CalendarEventsModal  ctx={ctx} calendar={data} />;
   if(type==="manage-calendar")  return <ManageCalendarModal  ctx={ctx} calendar={data} />;
   if(type==="day-events")       return <DayEventsModal       ctx={ctx} date={data.date} />;
-  if(type==="create-org")       return <CreateOrgModal       ctx={ctx} />;
+  if(type==="create-course")     return <CreateCourseModal     ctx={ctx} />;
+  if(type==="manage-course")     return <ManageCourseModal     ctx={ctx} courseId={data.courseId} course={data.course} />;
+  if(type==="course-join-prompt")return <CourseJoinPromptModal ctx={ctx} courseId={data.courseId} course={data.course} prompt={data.prompt} />;
+  if(type==="course-detail")     return <CourseDetailModal     ctx={ctx} courseId={data.courseId} course={data.course} />;
+  if(type==="course-members")    return <CourseMembersModal    ctx={ctx} courseId={data.courseId} course={data.course} />;
+  if(type==="create-org")        return <CreateOrgModal        ctx={ctx} />;
   if(type==="manage-org")       return <ManageOrgModal       ctx={ctx} orgId={data.orgId} org={data.org} />;
   if(type==="join-prompt")      return <JoinPromptModal      ctx={ctx} orgId={data.orgId} org={data.org} prompt={data.prompt} />;
   if(type==="org-detail")       return <OrgDetailModal       ctx={ctx} orgId={data.orgId} org={data.org} />;
