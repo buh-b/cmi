@@ -1101,7 +1101,6 @@ function ModalRouter({ modal, ctx }) {
   if(type==="day-events")       return <DayEventsModal       ctx={ctx} date={data.date} />;
   if(type==="create-course")     return <CreateCourseModal     ctx={ctx} />;
   if(type==="manage-course")     return <ManageCourseModal     ctx={ctx} courseId={data.courseId} course={data.course} />;
-  if(type==="course-join-prompt")return <CourseJoinPromptModal ctx={ctx} courseId={data.courseId} course={data.course} prompt={data.prompt} />;
   if(type==="course-detail")     return <CourseDetailModal     ctx={ctx} courseId={data.courseId} course={data.course} />;
   if(type==="course-members")    return <CourseMembersModal    ctx={ctx} courseId={data.courseId} course={data.course} />;
   if(type==="create-org")        return <CreateOrgModal        ctx={ctx} />;

@@ -23,12 +23,10 @@
 const COURSE_BASE        = "/organizations.v2.OrganizationService";
 const COURSE_MEM_BASE    = "/organizations.v2.OrganizationMembershipService";
 const COURSE_CAL_BASE    = "/organizations.v2.OrganizationCalendarService";
-const COURSE_PROMPT_BASE = "/organizations.v2.OrganizationJoinPromptService";
 
 const courseApi       = (method, body, sid) => apiCall(`${COURSE_BASE}/${method}`,       body, sid);
 const courseMemApi    = (method, body, sid) => apiCall(`${COURSE_MEM_BASE}/${method}`,    body, sid);
 const courseCalApi    = (method, body, sid) => apiCall(`${COURSE_CAL_BASE}/${method}`,    body, sid);
-const coursePromptApi = (method, body, sid) => apiCall(`${COURSE_PROMPT_BASE}/${method}`, body, sid);
 
 // ─── AUDIT LOG ────────────────────────────────────────────────────────────────
 function loadCourseAuditLog(courseId) {
@@ -138,13 +136,18 @@ function StudyHubTab({ ctx }) {
       await Promise.allSettled(ids.map(async (id) => {
         try {
           const d = await courseApi("GetOrganization", { organizationId: Number(id) }, sessionId);
+          const rawDesc = d.description || "";
+          if (!rawDesc.startsWith("COURSE:")) return;
+          const inner      = rawDesc.slice("COURSE:".length).trim();
+          const genreMatch = inner.match(/^\[([^\]]+)\]\s*/);
+          const genre      = genreMatch ? genreMatch[1] : "Other";
+          const visDesc    = genreMatch ? inner.slice(genreMatch[0].length) : inner;
           details[id] = {
             id,
-            name:                d.name || "",
-            description:         d.description || "",
-            genre:               d.genre || "Other",
-            requiresJoinRequest: d.requiresJoinRequest || false,
-            createdAt:           d.createdAt || null,
+            name:        d.name || "",
+            description: visDesc,
+            genre,
+            createdAt:   d.createdAt || null,
           };
         } catch(e) {}
       }));
@@ -163,27 +166,6 @@ function StudyHubTab({ ctx }) {
   // ── Join course
   async function handleJoin(courseId) {
     const course = courseDetails[courseId];
-    if (course?.requiresJoinRequest) {
-      setJoinLoading(courseId);
-      try {
-        const promptRes = await coursePromptApi("GetCurrentJoinPrompt", { organizationId: Number(courseId) }, sessionId);
-        const promptId  = promptRes?.joinPromptEventId;
-        if (!promptId) {
-          showToast("This course requires approval but has no questionnaire set up yet. Contact the owner.", "error");
-          setJoinLoading(null);
-          return;
-        }
-        const promptDetail = await coursePromptApi("GetJoinPrompt", { joinPromptEventId: promptId }, sessionId);
-        setJoinLoading(null);
-        setModal({ type: "course-join-prompt", data: { courseId, course, prompt: { text: promptDetail.prompt || "", joinPromptEventId: promptId } } });
-        return;
-      } catch(e) {
-        showToast("Could not load join questionnaire: " + (e.message || "unknown error"), "error");
-        setJoinLoading(null);
-        return;
-      }
-    }
-
     setConfirmDlg({
       message: `Join "${course?.name}"?`,
       description: course?.description || undefined,
@@ -372,9 +354,6 @@ function StudyHubTab({ ctx }) {
                       {joined && !owned && (
                         <span style={{ fontSize:10, padding:"2px 7px", borderRadius:4, background:"rgba(52,211,153,0.15)", color:"var(--green)", fontWeight:700, border:"1px solid rgba(52,211,153,0.3)" }}>Enrolled</span>
                       )}
-                      {course.requiresJoinRequest && (
-                        <span style={{ fontSize:10, padding:"2px 7px", borderRadius:4, background:"rgba(251,191,36,0.12)", color:"#fbbf24", fontWeight:700, border:"1px solid rgba(251,191,36,0.25)" }}>Approval</span>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -458,7 +437,7 @@ function StudyHubTab({ ctx }) {
 // ─── CREATE COURSE MODAL ──────────────────────────────────────────────────────
 function CreateCourseModal({ ctx }) {
   const { sessionId, closeModal, showToast, currentUser } = ctx;
-  const [form, setForm]       = React.useState({ name:"", description:"", genre:"SAS", requiresJoinRequest:false });
+  const [form, setForm]       = React.useState({ name:"", description:"", genre:"SAS" });
   const [error, setError]     = React.useState("");
   const [loading, setLoading] = React.useState(false);
 
@@ -466,12 +445,12 @@ function CreateCourseModal({ ctx }) {
     if (!form.name.trim()) { setError("Course name is required."); return; }
     setLoading(true); setError("");
     try {
+      const taggedDesc = `COURSE:[${form.genre}] ${form.description.trim()}`.trimEnd();
       const body = {
         name:                form.name.trim(),
-        requiresJoinRequest: form.requiresJoinRequest,
-        genre:               form.genre,
+        requiresJoinRequest: false,
+        description:         taggedDesc,
       };
-      if (form.description.trim()) body.description = form.description.trim();
       const res = await courseApi("CreateOrganization", body, sessionId);
       const courseId = res.organizationId != null ? String(res.organizationId) : null;
       if (courseId) {
@@ -530,23 +509,6 @@ function CreateCourseModal({ ctx }) {
               Select the department or school this course belongs to.
             </div>
           </div>
-
-          <div className="form-group" style={{ marginTop:4 }}>
-            <label style={{ display:"flex", alignItems:"center", gap:10, cursor:"pointer", fontSize:14 }}>
-              <input
-                type="checkbox"
-                checked={form.requiresJoinRequest}
-                onChange={e => setForm(f => ({ ...f, requiresJoinRequest:e.target.checked }))}
-                style={{ width:16, height:16, accentColor:"var(--accent)" }}
-              />
-              <span>
-                <span style={{ fontWeight:600, color:"var(--text)" }}>Require approval to enroll</span>
-                <div style={{ fontSize:12, color:"var(--text3)", marginTop:2 }}>
-                  Students must be approved before they can enroll.
-                </div>
-              </span>
-            </label>
-          </div>
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={closeModal}>Cancel</button>
@@ -560,14 +522,13 @@ function CreateCourseModal({ ctx }) {
 }
 
 // ─── MANAGE COURSE MODAL ──────────────────────────────────────────────────────
-// Owner-only: update metadata, push/unpush calendars, manage join questionnaire
+// Owner-only: update metadata, push/unpush calendars, view members
 function ManageCourseModal({ ctx, courseId, course }) {
   const { sessionId, closeModal, showToast, myCalendars, currentUser } = ctx;
 
   const [name,         setName]         = React.useState(course.name || "");
   const [description,  setDescription]  = React.useState(course.description || "");
   const [genre,        setGenre]        = React.useState(course.genre || "SAS");
-  const [requiresJoin, setRequiresJoin] = React.useState(course.requiresJoinRequest || false);
   const [metaLoading,  setMetaLoading]  = React.useState(false);
   const [error,        setError]        = React.useState("");
 
@@ -579,13 +540,6 @@ function ManageCourseModal({ ctx, courseId, course }) {
 
   const [members,        setMembers]        = React.useState([]);
   const [membersLoading, setMembersLoading] = React.useState(false);
-
-  const [currentPromptId,   setCurrentPromptId]   = React.useState(null);
-  const [currentPromptText, setCurrentPromptText] = React.useState("");
-  const [newPromptText,     setNewPromptText]      = React.useState("");
-  const [promptLoading,     setPromptLoading]      = React.useState(true);
-  const [promptSaving,      setPromptSaving]       = React.useState(false);
-  const [promptError,       setPromptError]        = React.useState("");
 
   const ownedCals = myCalendars().filter(c => c.isOwner);
 
@@ -623,21 +577,7 @@ function ManageCourseModal({ ctx, courseId, course }) {
     }
   }
 
-  async function loadJoinPrompt() {
-    setPromptLoading(true);
-    try {
-      const res = await coursePromptApi("GetCurrentJoinPrompt", { organizationId: Number(courseId) }, sessionId);
-      if (res?.joinPromptEventId) {
-        const detail = await coursePromptApi("GetJoinPrompt", { joinPromptEventId: res.joinPromptEventId }, sessionId);
-        setCurrentPromptId(res.joinPromptEventId);
-        setCurrentPromptText(detail.prompt || "");
-        setNewPromptText(detail.prompt || "");
-      }
-    } catch(e) {}
-    finally { setPromptLoading(false); }
-  }
-
-  React.useEffect(() => { loadSharedCals(); loadJoinPrompt(); }, [courseId]);
+  React.useEffect(() => { loadSharedCals(); }, [courseId]);
   React.useEffect(() => { if (activeSection === "members") loadMembers(); }, [activeSection, courseId]);
 
   async function toggleCalendar(calId) {
@@ -656,31 +596,16 @@ function ManageCourseModal({ ctx, courseId, course }) {
     }
   }
 
-  async function saveJoinPrompt() {
-    if (!newPromptText.trim()) { setPromptError("Prompt text cannot be empty."); return; }
-    setPromptSaving(true); setPromptError("");
-    try {
-      const res = await coursePromptApi("CreateJoinPrompt", { organizationId: Number(courseId), prompt: newPromptText.trim() }, sessionId);
-      setCurrentPromptId(res.joinPromptEventId);
-      setCurrentPromptText(newPromptText.trim());
-      showToast("Enrollment questionnaire saved!");
-    } catch(e) {
-      setPromptError(e.message || "Failed to save questionnaire.");
-    } finally {
-      setPromptSaving(false);
-    }
-  }
-
   async function saveSettings() {
     if (!name.trim()) { setError("Name is required."); return; }
     setMetaLoading(true); setError("");
     try {
+      const taggedDesc = `COURSE:[${genre}] ${description.trim()}`.trimEnd();
       await courseApi("UpdateOrganization", {
-        organizationId:     Number(courseId),
-        name:               name.trim(),
-        description:        description.trim() || undefined,
-        genre:              genre,
-        requiresJoinRequest: requiresJoin,
+        organizationId:      Number(courseId),
+        name:                name.trim(),
+        description:         taggedDesc,
+        requiresJoinRequest: false,
       }, sessionId);
       showToast("Course updated!");
       if (typeof window.__refreshCourses === "function") window.__refreshCourses();
@@ -720,7 +645,6 @@ function ManageCourseModal({ ctx, courseId, course }) {
         {/* Section switcher */}
         <div style={{ padding:"0 24px", borderBottom:"1px solid var(--border)", display:"flex", gap:4, background:"var(--surface2)", overflowX:"auto" }}>
           <button style={sectionBtnStyle("calendars")}   onClick={() => setActiveSection("calendars")}>📅 Shared Calendars</button>
-          <button style={sectionBtnStyle("join-prompt")} onClick={() => setActiveSection("join-prompt")}>📋 Questionnaire</button>
           <button style={sectionBtnStyle("members")}     onClick={() => setActiveSection("members")}>👥 Students</button>
           <button style={sectionBtnStyle("activity")}    onClick={() => setActiveSection("activity")}>📋 Activity</button>
           <button style={sectionBtnStyle("settings")}    onClick={() => setActiveSection("settings")}>⚙️ Settings</button>
@@ -825,54 +749,6 @@ function ManageCourseModal({ ctx, courseId, course }) {
             </div>
           )}
 
-          {/* ── JOIN QUESTIONNAIRE ── */}
-          {activeSection === "join-prompt" && (
-            <div>
-              <div style={{ fontSize:13, color:"var(--text2)", marginBottom:16, lineHeight:1.6 }}>
-                Write a question students must answer before their enrollment request is reviewed.
-                Only applies when <strong style={{ color:"var(--text)" }}>Require approval to enroll</strong> is enabled.
-              </div>
-              {promptLoading ? (
-                <div style={{ textAlign:"center", padding:"24px 0", color:"var(--text3)", fontSize:13 }}>Loading…</div>
-              ) : (
-                <div>
-                  {promptError && <div className="error-msg" style={{ marginBottom:12 }}>{promptError}</div>}
-                  {currentPromptId && currentPromptText && (
-                    <div style={{ padding:"12px 16px", borderRadius:10, marginBottom:16,
-                      background:"rgba(108,99,255,0.07)", border:"1.5px solid rgba(108,99,255,0.25)" }}>
-                      <div style={{ fontSize:11, fontWeight:700, letterSpacing:1.2, textTransform:"uppercase", color:"var(--accent2)", marginBottom:6 }}>
-                        ✅ Active Questionnaire
-                      </div>
-                      <div style={{ fontSize:14, color:"var(--text)", lineHeight:1.6, whiteSpace:"pre-wrap" }}>
-                        {currentPromptText}
-                      </div>
-                    </div>
-                  )}
-                  {!currentPromptId && (
-                    <div style={{ padding:"12px 16px", borderRadius:10, marginBottom:16,
-                      background:"rgba(251,191,36,0.08)", border:"1px solid rgba(251,191,36,0.25)",
-                      fontSize:13, color:"#fbbf24" }}>
-                      ⚠️ No questionnaire set. Students can enroll without answering questions.
-                    </div>
-                  )}
-                  <div className="form-group">
-                    <label className="form-label">{currentPromptId ? "Update Questionnaire" : "Create Questionnaire"}</label>
-                    <textarea className="form-input" value={newPromptText}
-                      onChange={e => setNewPromptText(e.target.value)}
-                      placeholder="e.g. What is your student ID? What year level are you?"
-                      rows={5} style={{ resize:"vertical", fontFamily:"inherit", lineHeight:1.6 }} />
-                    <div style={{ fontSize:12, color:"var(--text3)", marginTop:6 }}>
-                      Tip: You can ask multiple questions — put each on its own line.
-                    </div>
-                  </div>
-                  <button className="btn btn-primary btn-sm" onClick={saveJoinPrompt} disabled={promptSaving}>
-                    {promptSaving ? "Saving…" : currentPromptId ? "Update Questionnaire" : "Save Questionnaire"}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* ── ACTIVITY ── */}
           {activeSection === "activity" && (() => {
             const log = loadCourseAuditLog(courseId);
@@ -950,17 +826,6 @@ function ManageCourseModal({ ctx, courseId, course }) {
                   ))}
                 </select>
               </div>
-              <div className="form-group" style={{ marginTop:4 }}>
-                <label style={{ display:"flex", alignItems:"center", gap:10, cursor:"pointer", fontSize:14 }}>
-                  <input type="checkbox" checked={requiresJoin}
-                    onChange={e => setRequiresJoin(e.target.checked)}
-                    style={{ width:16, height:16, accentColor:"var(--accent)" }} />
-                  <span>
-                    <span style={{ fontWeight:600, color:"var(--text)" }}>Require approval to enroll</span>
-                    <div style={{ fontSize:12, color:"var(--text3)", marginTop:2 }}>New students must be approved before enrolling.</div>
-                  </span>
-                </label>
-              </div>
               <button className="btn btn-primary btn-sm" onClick={saveSettings} disabled={metaLoading}>
                 {metaLoading ? "Saving…" : "Save Settings"}
               </button>
@@ -970,90 +835,6 @@ function ManageCourseModal({ ctx, courseId, course }) {
 
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={closeModal}>Close</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── COURSE JOIN PROMPT MODAL ─────────────────────────────────────────────────
-function CourseJoinPromptModal({ ctx, courseId, course, prompt }) {
-  const { sessionId, closeModal, showToast, currentUser } = ctx;
-  const [answer,  setAnswer]  = React.useState("");
-  const [loading, setLoading] = React.useState(false);
-  const [error,   setError]   = React.useState("");
-  const col = courseColor(courseId);
-
-  async function submit() {
-    if (!answer.trim()) { setError("Please answer the questionnaire before submitting."); return; }
-    setLoading(true); setError("");
-    try {
-      const responseRes = await apiCall(
-        "/organizations.v2.OrganizationJoinResponseService/CreateJoinResponse",
-        { joinPromptEventId: prompt?.joinPromptEventId, response: answer.trim() },
-        sessionId
-      );
-      const joinResponseEventId = responseRes?.joinResponseEventId;
-      if (!joinResponseEventId) throw new Error("No response ID returned from server.");
-      await apiCall(
-        "/organizations.v2.OrganizationJoinRequestService/CreateJoinRequest",
-        { joinResponseEventId },
-        sessionId
-      );
-      showToast(`Enrollment request submitted to "${course.name}"! Waiting for approval.`);
-      if (typeof window.__refreshCourses === "function") window.__refreshCourses();
-      closeModal();
-    } catch(e) {
-      setError(e.message || "Failed to submit enrollment request.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <div className="modal-overlay" onClick={closeModal}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <div style={{ display:"flex", alignItems:"center", gap:10, flex:1 }}>
-            <div style={{
-              width:32, height:32, borderRadius:8, background:col+"22",
-              border:`1.5px solid ${col}55`, display:"flex", alignItems:"center",
-              justifyContent:"center", fontWeight:800, fontSize:12, color:col,
-            }}>
-              {courseInitials(course.name)}
-            </div>
-            <div>
-              <div className="modal-title" style={{ fontSize:15 }}>Enroll in {course.name}</div>
-              <div style={{ fontSize:12, color:"var(--text3)" }}>Approval required — answer below</div>
-            </div>
-          </div>
-          <button className="close-btn" onClick={closeModal}>✕</button>
-        </div>
-        <div className="modal-body">
-          {error && <div className="error-msg" style={{ marginBottom:12 }}>{error}</div>}
-          <div style={{ padding:"12px 16px", borderRadius:10, marginBottom:16,
-            background:"var(--surface2)", border:"1px solid var(--border)" }}>
-            <div style={{ fontSize:11, fontWeight:700, letterSpacing:1.2, textTransform:"uppercase", color:"var(--text3)", marginBottom:8 }}>
-              📋 Questionnaire
-            </div>
-            <div style={{ fontSize:14, color:"var(--text)", lineHeight:1.7, whiteSpace:"pre-wrap" }}>
-              {prompt?.text || prompt}
-            </div>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Your Answer *</label>
-            <textarea className="form-input" value={answer}
-              onChange={e => setAnswer(e.target.value)}
-              placeholder="Type your answer here…"
-              rows={5} style={{ resize:"vertical", fontFamily:"inherit", lineHeight:1.6 }}
-              autoFocus />
-          </div>
-        </div>
-        <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={closeModal}>Cancel</button>
-          <button className="btn btn-primary" onClick={submit} disabled={loading}>
-            {loading ? "Submitting…" : "Submit Request"}
-          </button>
         </div>
       </div>
     </div>
