@@ -560,16 +560,18 @@ function ManageOrgModal({ ctx, orgId, org }) {
 
   // Load which calendars are already shared to this org
   async function loadSharedCals() {
-    setCalLoading(true);
-    try {
-      const res = await orgCalApi("GetOrganizationCalendars", { organizationId: Number(orgId) }, sessionId);
-    } catch(e) {
-      // 404 = no calendars shared yet — that's fine
-      setSharedCalIds([]);
-    } finally {
-      setCalLoading(false);
-    }
+  setCalLoading(true);
+  try {
+    const res = await orgCalApi("GetOrganizationCalendars", { organizationId: Number(orgId) }, sessionId);
+  const ids = (res.calendarIds || []).map(String);
+  setSharedCalIds(ids);
+
+  } catch(e) {
+    setSharedCalIds([]);
+  } finally {
+    setCalLoading(false);
   }
+}
 
   React.useEffect(() => { loadSharedCals(); }, [orgId]);
 
