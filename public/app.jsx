@@ -246,8 +246,19 @@ async function fetchAllCalendars(sid, calPrefs, userId) {
     const res = await apiCall("/users.v2.UserProfileService/GetUserOwnedCalendars", {}, sid);
     const serverOwned = (res.calendarIds || []).map(strId);
     const local = loadCalendarIds(userId);
-    // Merge server IDs into local so we don't lose joined calendars
-    const merged = { owned: [...new Set([...serverOwned, ...local.owned.map(strId)])], joined: local.joined };
+  const recoveredJoined = serverOwned.length > 0
+  ? [] // server only returns owned; joined must be inferred another way
+  : [];
+  // Re-hydrate joined from server: attempt GetUserJoinedCalendars if available
+  let serverJoined = [];
+try {
+  const joinedRes = await apiCall("/users.v2.UserProfileService/GetUserJoinedCalendars", {}, sid);
+  serverJoined = (joinedRes.calendarIds || []).map(strId);
+} catch(e) { /* endpoint may not exist — fall back to local */ }
+const merged = {
+  owned:  [...new Set([...serverOwned,   ...local.owned.map(strId)])],
+  joined: [...new Set([...serverJoined,  ...local.joined.map(strId)])],
+};
     saveCalendarIds(userId, merged);
   } catch(e) {
     console.warn("Could not fetch owned calendars from server:", e.message);
