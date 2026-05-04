@@ -1091,6 +1091,7 @@ function OrgDetailModal({ ctx, orgId, org }) {
     setLoading(true);
     try {
       const res = await orgCalApi("GetOrganizationCalendars", { organizationId: Number(orgId) }, sessionId);
+      const ids = (res.calendarIds || []).map(String);
       setSharedCalIds(ids);
 
       // Fetch calendar details
