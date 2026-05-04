@@ -911,11 +911,13 @@ function ManageOrgModal({ ctx, orgId, org }) {
                   Membership activity for this organization — visible only to you as owner.
                 </div>
                 {log.length === 0 ? (
-                  <div style={{ textAlign:"center", padding:"40px 0", color:"var(--text3)" }}>
-                    <div style={{ fontSize:32, marginBottom:8 }}>📋</div>
-                    <div style={{ fontSize:13 }}>No activity recorded yet.</div>
-                    <div style={{ fontSize:12, marginTop:4 }}>Join and leave events will appear here.</div>
+                <div style={{ textAlign:"center", padding:"40px 0", color:"var(--text3)" }}>
+                  <div style={{ fontSize:32, marginBottom:8 }}>📋</div>
+                  <div style={{ fontSize:13 }}>No activity recorded yet.</div>
+                  <div style={{ fontSize:12, marginTop:4 }}>
+                    Activity is recorded locally — join and leave events from this device will appear here.
                   </div>
+                </div>
                 ) : (
                   <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                     {log.map((entry, i) => {

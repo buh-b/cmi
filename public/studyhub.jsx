@@ -78,16 +78,16 @@ function isCourseOwned(userId, courseId) {
 const GENRES = ["All", "SAS", "SAFAD", "SBMA", "SOM", "SOL", "SASE", "SOE", "SIT", "SNS", "Other"];
 
 const GENRE_COLORS = {
-  SAS:   "var(--blue)",
-  SAFAD: "var(--pink)",
-  SBMA:  "var(--green)",
-  SOM:   "var(--yellow)",
-  SOL:   "var(--orange)",
-  SASE:  "var(--teal)",
-  SOE:   "var(--accent)",
-  SIT:   "var(--accent2)",
-  SNS:   "var(--red)",
-  Other: "var(--text3)",
+  SAS:   "#3b82f6",
+  SAFAD: "#ec4899",
+  SBMA:  "#22c55e",
+  SOM:   "#eab308",
+  SOL:   "#f97316",
+  SASE:  "#14b8a6",
+  SOE:   "#6c63ff",
+  SIT:   "#2dd4bf",
+  SNS:   "#ef4444",
+  Other: "#94a3b8",
 };
 
 function genreColor(genre) {
