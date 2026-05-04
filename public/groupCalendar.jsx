@@ -22,7 +22,12 @@ function CalendarsPage({ ctx }) {
 
   const [tab, setTab] = React.useState("all");
   const [confirmDlg, setConfirmDlg] = React.useState(null);
-  const cals     = myCalendars();
+
+  // Sort by ID descending so newest calendars appear first.
+  // IDs are auto-incremented by the backend, so higher ID = more recently created.
+  // .slice() prevents mutating the original state array.
+  const cals = myCalendars().slice().sort((a, b) => Number(b.id) - Number(a.id));
+
   const filtered = tab === "all"
     ? cals
     : tab === "owned"
