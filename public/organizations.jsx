@@ -111,7 +111,8 @@ function OrganizationsTab({ ctx }) {
       await Promise.allSettled(ids.map(async (id) => {
         try {
           const d = await orgApi("GetOrganization", { organizationId: Number(id) }, sessionId);
-          // Normalise field names: proto returns camelCase via ConnectRPC JSON
+          // Skip anything tagged as a StudyHub course — it doesn't belong here
+          if ((d.description || "").startsWith("COURSE:")) return;
           details[id] = {
             id,
             name:                d.name || "",
