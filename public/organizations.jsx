@@ -23,13 +23,21 @@ const orgMemApi    = (method, body, sid) => apiCall(`${ORG_MEM_BASE}/${method}`,
 const orgCalApi    = (method, body, sid) => apiCall(`${ORG_CAL_BASE}/${method}`, body, sid);
 const orgPromptApi = (method, body, sid) => apiCall(`${ORG_PROMPT_BASE}/${method}`, body, sid);
 
-function loadOrgAuditLog(orgId) {
-  try { const r = localStorage.getItem(`usc_org_audit_${orgId}`); return r ? JSON.parse(r) : []; } catch(e) { return []; }
+const ORG_AUDIT_BASE = "/organizations.v2.OrganizationAuditLogService";
+const orgAuditApi = (method, body, sid) => apiCall(`${ORG_AUDIT_BASE}/${method}`, body, sid);
+
+async function loadOrgMembersHistory(orgId, sessionId) {
+  try {
+    const res = await orgAuditApi("GetMembersHistory", { organizationId: Number(orgId) }, sessionId);
+    return res.events || [];
+  } catch(e) { return []; }
 }
-function addOrgAuditEntry(orgId, entry) {
-  const log = loadOrgAuditLog(orgId);
-  log.unshift({ ...entry, timestamp: new Date().toISOString() });
-  try { localStorage.setItem(`usc_org_audit_${orgId}`, JSON.stringify(log.slice(0, 100))); } catch(e) {}
+
+async function loadOrgCalendarsHistory(orgId, sessionId) {
+  try {
+    const res = await orgAuditApi("GetCalendarsHistory", { organizationId: Number(orgId) }, sessionId);
+    return res.events || [];
+  } catch(e) { return []; }
 }
 
 // ─── LOCAL STORAGE — track joined org IDs (no server list-my-orgs endpoint) ──
@@ -166,7 +174,6 @@ function OrganizationsTab({ ctx }) {
         try {
           await orgMemApi("JoinOrganization", { organizationId: Number(orgId) }, sessionId);
           addJoinedOrgId(userId, orgId);
-          addOrgAuditEntry(orgId, { name: currentUser.name || currentUser.email, action: "joined" });
           showToast(`Joined "${org?.name}"!`);
           setAllOrgs(prev => [...prev]);
         } catch(e) {
@@ -189,13 +196,14 @@ function OrganizationsTab({ ctx }) {
   const name = orgDetails[orgId]?.name || "this organization";
   setConfirmDlg({
     message: `Leave "${name}"?`,
+    description: "You will lose access to shared calendars from this organization.",
     danger: true,
+    confirmLabel: "Yes, Leave",
     onConfirm: async () => {
       setLeaveLoading(orgId);
       try {
         await orgMemApi("LeaveOrganization", { organizationId: Number(orgId) }, sessionId);
         removeOrgId(userId, orgId);
-        addOrgAuditEntry(orgId, { name: currentUser.name || currentUser.email, action: "left" });
         showToast(`Left "${name}"`);
         setAllOrgs(prev => [...prev]);
       } catch(e) {
@@ -208,18 +216,25 @@ function OrganizationsTab({ ctx }) {
 }
 
   // ── Delete org (owner only)
-  async function handleDelete(orgId) {
+  function handleDelete(orgId) {
     const name = orgDetails[orgId]?.name || "this organization";
-    if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return;
-    try {
-      await orgApi("DeleteOrganization", { organizationId: Number(orgId) }, sessionId);
-      removeOrgId(userId, orgId);
-      showToast(`Deleted "${name}"`);
-      if (typeof window.__refreshOrgs === "function") window.__refreshOrgs();
-      setAllOrgs(prev => prev.filter(id => id !== orgId));
-    } catch(e) {
-      showToast(e.message || "Failed to delete.", "error");
-    }
+    setConfirmDlg({
+      message: `Delete "${name}"?`,
+      description: "This will permanently delete the organization and cannot be undone.",
+      danger: true,
+      confirmLabel: "Yes, Delete",
+      onConfirm: async () => {
+        try {
+          await orgApi("DeleteOrganization", { organizationId: Number(orgId) }, sessionId);
+          removeOrgId(userId, orgId);
+          showToast(`Deleted "${name}"`);
+          if (typeof window.__refreshOrgs === "function") window.__refreshOrgs();
+          setAllOrgs(prev => prev.filter(id => id !== orgId));
+        } catch(e) {
+          showToast(e.message || "Failed to delete.", "error");
+        }
+      }
+    });
   }
 
   // ── Filter
@@ -527,8 +542,68 @@ function ManageOrgModal({ ctx, orgId, org }) {
   const [calLoading,   setCalLoading]   = React.useState(true);
   const [toggleLoading,setToggleLoading]= React.useState(null); // calId being toggled
 
-  const [activeSection, setActiveSection] = React.useState("calendars"); // "calendars" | "join-prompt" | "members" | "settings"
+  const [activeSection, setActiveSection] = React.useState("calendars"); // "calendars" | "join-prompt" | "members" | "activity" | "settings"
 
+// ── Activity state
+const [activityLog,     setActivityLog]     = React.useState([]);
+const [activityLoading, setActivityLoading] = React.useState(false);
+
+async function loadActivity() {
+  setActivityLoading(true);
+  try {
+    const [membersRes, calsRes] = await Promise.all([
+      loadOrgMembersHistory(orgId, sessionId),
+      loadOrgCalendarsHistory(orgId, sessionId),
+    ]);
+
+    // Normalize member events
+    const memberEvents = membersRes.map(e => ({
+      type:      "member",
+      action:    e.added ? "joined" : "left",
+      userId:    e.memberUserId,
+      timestamp: e.createdAt?.seconds
+        ? new Date(Number(e.createdAt.seconds) * 1000)
+        : new Date(),
+    }));
+
+    // Normalize calendar events
+    const calEvents = calsRes.map(e => ({
+      type:      "calendar",
+      action:    e.added ? "calendar added" : "calendar removed",
+      calendarId: e.calendarId,
+      timestamp: e.createdAt?.seconds
+        ? new Date(Number(e.createdAt.seconds) * 1000)
+        : new Date(),
+    }));
+
+    // Merge and sort newest first
+    const merged = [...memberEvents, ...calEvents]
+      .sort((a, b) => b.timestamp - a.timestamp);
+
+    // Resolve user names for member events
+    const resolved = await Promise.all(merged.map(async (entry) => {
+      if (entry.type === "member" && entry.userId) {
+        try {
+          const u = await apiCall("/users.v2.UserService/GetUser", { userId: entry.userId }, sessionId);
+          entry.name = [u.firstName, u.middleName, u.lastName].filter(Boolean).join(" ") || `User #${entry.userId}`;
+        } catch(e) {
+          entry.name = `User #${entry.userId}`;
+        }
+      }
+      return entry;
+    }));
+
+    setActivityLog(resolved);
+  } catch(e) {
+    setActivityLog([]);
+  } finally {
+    setActivityLoading(false);
+  }
+}
+
+React.useEffect(() => {
+  if (activeSection === "activity") loadActivity();
+}, [activeSection, orgId]);
   // ── Members state
   const [members,        setMembers]        = React.useState([]);
   const [membersLoading, setMembersLoading] = React.useState(false);
@@ -903,63 +978,67 @@ function ManageOrgModal({ ctx, orgId, org }) {
             </div>
           )}
 
-          {activeSection === "activity" && (() => {
-            const log = loadOrgAuditLog(orgId);
-            return (
-              <div>
-                <div style={{ fontSize:12, color:"var(--text3)", marginBottom:14 }}>
-                  Membership activity for this organization — visible only to you as owner.
-                </div>
-                {log.length === 0 ? (
-                <div style={{ textAlign:"center", padding:"40px 0", color:"var(--text3)" }}>
-                  <div style={{ fontSize:32, marginBottom:8 }}>📋</div>
-                  <div style={{ fontSize:13 }}>No activity recorded yet.</div>
-                  <div style={{ fontSize:12, marginTop:4 }}>
-                    Activity is recorded locally — join and leave events from this device will appear here.
-                  </div>
-                </div>
-                ) : (
-                  <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                    {log.map((entry, i) => {
-                      const isJoin = entry.action === "joined";
-                      return (
-                        <div key={i} style={{ display:"flex", alignItems:"center", gap:12,
-                          padding:"10px 14px", borderRadius:10,
-                          background:"var(--surface2)", border:"1px solid var(--border)" }}>
-                          <div style={{ width:32, height:32, borderRadius:"50%", flexShrink:0,
-                            background: PALETTE[i % PALETTE.length] + "22",
-                            border:`1.5px solid ${PALETTE[i % PALETTE.length]}55`,
-                            display:"flex", alignItems:"center", justifyContent:"center",
-                            fontSize:12, fontWeight:700, color: PALETTE[i % PALETTE.length] }}>
-                            {(entry.name||"?")[0].toUpperCase()}
-                          </div>
-                          <div style={{ flex:1, minWidth:0 }}>
-                            <div style={{ fontSize:13, fontWeight:600, color:"var(--text)",
-                              whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                              {entry.name || "Unknown"}
-                            </div>
-                            <div style={{ fontSize:11, color:"var(--text3)", marginTop:1 }}>
-                              {new Date(entry.timestamp).toLocaleString("en-PH", {
-                                month:"short", day:"numeric", year:"numeric",
-                                hour:"2-digit", minute:"2-digit"
-                              })}
-                            </div>
-                          </div>
-                          <span style={{ fontSize:11, fontWeight:700, padding:"3px 9px", borderRadius:20,
-                            whiteSpace:"nowrap", flexShrink:0,
-                            background: isJoin ? "rgba(52,211,153,0.12)" : "rgba(248,113,113,0.12)",
-                            color: isJoin ? "var(--green)" : "var(--red)",
-                            border: isJoin ? "1px solid rgba(52,211,153,0.3)" : "1px solid rgba(248,113,113,0.3)" }}>
-                            {entry.action}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+          {activeSection === "activity" && (
+  <div>
+    <div style={{ fontSize:12, color:"var(--text3)", marginBottom:14 }}>
+      Membership and calendar activity for this organization — visible only to you as owner.
+    </div>
+    {activityLoading ? (
+      <div style={{ textAlign:"center", padding:"40px 0", color:"var(--text3)", fontSize:13 }}>
+        Loading activity…
+      </div>
+    ) : activityLog.length === 0 ? (
+      <div style={{ textAlign:"center", padding:"40px 0", color:"var(--text3)" }}>
+        <div style={{ fontSize:32, marginBottom:8 }}>📋</div>
+        <div style={{ fontSize:13 }}>No activity recorded yet.</div>
+        <div style={{ fontSize:12, marginTop:4 }}>Join, leave, and calendar events will appear here.</div>
+      </div>
+    ) : (
+      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+        {activityLog.map((entry, i) => {
+          const isJoin    = entry.action === "joined";
+          const isCalAdd  = entry.action === "calendar added";
+          const isPositive = isJoin || isCalAdd;
+          const label     = entry.type === "calendar"
+            ? `Calendar #${entry.calendarId}`
+            : (entry.name || "Unknown");
+          return (
+            <div key={i} style={{ display:"flex", alignItems:"center", gap:12,
+              padding:"10px 14px", borderRadius:10,
+              background:"var(--surface2)", border:"1px solid var(--border)" }}>
+              <div style={{ width:32, height:32, borderRadius:"50%", flexShrink:0,
+                background: PALETTE[i % PALETTE.length] + "22",
+                border:`1.5px solid ${PALETTE[i % PALETTE.length]}55`,
+                display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:12, fontWeight:700, color: PALETTE[i % PALETTE.length] }}>
+                {entry.type === "calendar" ? "📅" : (label[0]?.toUpperCase() || "?")}
               </div>
-            );
-          })()}
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:13, fontWeight:600, color:"var(--text)",
+                  whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                  {label}
+                </div>
+                <div style={{ fontSize:11, color:"var(--text3)", marginTop:1 }}>
+                  {entry.timestamp.toLocaleString("en-PH", {
+                    month:"short", day:"numeric", year:"numeric",
+                    hour:"2-digit", minute:"2-digit"
+                  })}
+                </div>
+              </div>
+              <span style={{ fontSize:11, fontWeight:700, padding:"3px 9px", borderRadius:20,
+                whiteSpace:"nowrap", flexShrink:0,
+                background: isPositive ? "rgba(52,211,153,0.12)" : "rgba(248,113,113,0.12)",
+                color: isPositive ? "var(--green)" : "var(--red)",
+                border: isPositive ? "1px solid rgba(52,211,153,0.3)" : "1px solid rgba(248,113,113,0.3)" }}>
+                {entry.action}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    )}
+  </div>
+)}
         </div>
 
         <div className="modal-footer">

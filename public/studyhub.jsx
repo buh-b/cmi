@@ -75,19 +75,17 @@ function isCourseOwned(userId, courseId) {
 }
 
 // ─── GENRE DEFINITIONS ────────────────────────────────────────────────────────
-const GENRES = ["All", "SAS", "SAFAD", "SBMA", "SOM", "SOL", "SASE", "SOE", "SIT", "SNS", "Other"];
+const GENRES = ["All", "SAS", "SAFAD", "SBMA", "SOM", "SOL", "SOE", "SNS", "Other"];
 
 const GENRE_COLORS = {
-  SAS:   "#3b82f6",
-  SAFAD: "#ec4899",
-  SBMA:  "#22c55e",
-  SOM:   "#eab308",
-  SOL:   "#f97316",
-  SASE:  "#14b8a6",
-  SOE:   "#6c63ff",
-  SIT:   "#2dd4bf",
-  SNS:   "#ef4444",
-  Other: "#94a3b8",
+  SAS:   "var(--blue)",
+  SAFAD: "var(--pink)",
+  SBMA:  "var(--green)",
+  SOM:   "var(--yellow)",
+  SOL:   "var(--orange)",
+  SOE:   "var(--accent)",
+  SNS:   "var(--red)",
+  Other: "var(--text3)",
 };
 
 function genreColor(genre) {
@@ -198,7 +196,9 @@ function StudyHubTab({ ctx }) {
     const name = courseDetails[courseId]?.name || "this course";
     setConfirmDlg({
       message: `Leave "${name}"?`,
+      description: "You will lose access to shared calendars from this course.",
       danger: true,
+      confirmLabel: "Yes, Leave",
       onConfirm: async () => {
         setLeaveLoading(courseId);
         try {
@@ -217,18 +217,25 @@ function StudyHubTab({ ctx }) {
   }
 
   // ── Delete course
-  async function handleDelete(courseId) {
+  function handleDelete(courseId) {
     const name = courseDetails[courseId]?.name || "this course";
-    if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return;
-    try {
-      await courseApi("DeleteOrganization", { organizationId: Number(courseId) }, sessionId);
-      removeCourseId(userId, courseId);
-      showToast(`Deleted "${name}"`);
-      if (typeof window.__refreshCourses === "function") window.__refreshCourses();
-      setAllCourses(prev => prev.filter(id => id !== courseId));
-    } catch(e) {
-      showToast(e.message || "Failed to delete.", "error");
-    }
+    setConfirmDlg({
+      message: `Delete "${name}"?`,
+      description: "This will permanently delete the course and cannot be undone.",
+      danger: true,
+      confirmLabel: "Yes, Delete",
+      onConfirm: async () => {
+        try {
+          await courseApi("DeleteOrganization", { organizationId: Number(courseId) }, sessionId);
+          removeCourseId(userId, courseId);
+          showToast(`Deleted "${name}"`);
+          if (typeof window.__refreshCourses === "function") window.__refreshCourses();
+          setAllCourses(prev => prev.filter(id => id !== courseId));
+        } catch(e) {
+          showToast(e.message || "Failed to delete.", "error");
+        }
+      }
+    });
   }
 
   // ── Filter
