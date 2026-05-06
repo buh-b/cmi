@@ -18,10 +18,13 @@ const ORG_MEM_BASE    = "/organizations.v2.OrganizationMembershipService";
 const ORG_CAL_BASE    = "/organizations.v2.OrganizationCalendarService";
 const ORG_PROMPT_BASE = "/organizations.v2.OrganizationJoinPromptService";
 
+const ORG_ROLE_BASE   = "/organizations.v2.OrganizationMemberRoleService";
+
 const orgApi       = (method, body, sid) => apiCall(`${ORG_BASE}/${method}`, body, sid);
 const orgMemApi    = (method, body, sid) => apiCall(`${ORG_MEM_BASE}/${method}`, body, sid);
 const orgCalApi    = (method, body, sid) => apiCall(`${ORG_CAL_BASE}/${method}`, body, sid);
 const orgPromptApi = (method, body, sid) => apiCall(`${ORG_PROMPT_BASE}/${method}`, body, sid);
+const orgRoleApi   = (method, body, sid) => apiCall(`${ORG_ROLE_BASE}/${method}`, body, sid);
 
 const ORG_AUDIT_BASE = "/organizations.v2.OrganizationAuditLogService";
 const orgAuditApi = (method, body, sid) => apiCall(`${ORG_AUDIT_BASE}/${method}`, body, sid);
@@ -87,10 +90,11 @@ function orgInitials(name) {
 // ─── ORGANIZATIONS TAB ────────────────────────────────────────────────────────
 // Rendered inside CalendarsPage as a 4th tab "Organizations"
 function OrganizationsTab({ ctx }) {
-  const { sessionId, currentUser, setModal, showToast } = ctx;
+  const { sessionId, currentUser, setModal, showToast, refreshCalendars } = ctx;
 
   const [allOrgs,      setAllOrgs]      = React.useState([]);  // { id, name, description, requiresJoinRequest, createdAt }
   const [orgDetails,   setOrgDetails]   = React.useState({});  // id → full detail
+  const [membershipMap,setMembershipMap]= React.useState({});  // id → "owner" | "member" | null
   const [loading,      setLoading]      = React.useState(true);
   const [joinLoading,  setJoinLoading]  = React.useState(null); // orgId being joined
   const [leaveLoading, setLeaveLoading] = React.useState(null); // orgId being left
@@ -107,19 +111,23 @@ function OrganizationsTab({ ctx }) {
     return () => { delete window.__refreshOrgs; };
   }, []);
 
-  // ── Fetch all public org IDs, then fetch details for each
+  // ── Fetch all public org IDs, then fetch details + server-side membership/role
   async function loadOrgs() {
     setLoading(true);
     try {
-      const res = await orgApi("GetOrganizations", {}, sessionId);
-      const ids = (res.organizationIds || []).map(String);
+      // Fetch all orgs AND the current user's orgs in parallel
+      const [allRes, userRes] = await Promise.all([
+        orgApi("GetOrganizations", {}, sessionId),
+        orgApi("GetUserOrganizations", {}, sessionId),
+      ]);
+      const ids      = (allRes.organizationIds  || []).map(String);
+      const myOrgIds = new Set((userRes.organizationIds || []).map(String));
 
       // Fetch details in parallel
       const details = {};
       await Promise.allSettled(ids.map(async (id) => {
         try {
           const d = await orgApi("GetOrganization", { organizationId: Number(id) }, sessionId);
-          // Skip anything tagged as a StudyHub course — it doesn't belong here
           if ((d.description || "").startsWith("COURSE:")) return;
           details[id] = {
             id,
@@ -131,8 +139,26 @@ function OrganizationsTab({ ctx }) {
         } catch(e) {}
       }));
 
+      // For orgs the user belongs to, fetch their role from the server
+      const membership = {};
+      await Promise.allSettled([...myOrgIds].filter(id => details[id]).map(async (id) => {
+        try {
+          const r = await orgRoleApi("GetMemberRole", { organizationId: Number(id), memberUserId: userId }, sessionId);
+          const role = (r.role || "").toLowerCase();
+          membership[id] = role === "owner" ? "owner" : "member";
+          // Sync localStorage so existing code paths still work
+          if (role === "owner") addOwnedOrgId(userId, id);
+          else addJoinedOrgId(userId, id);
+        } catch(e) {
+          // If role fetch fails, fall back to marking as member
+          membership[id] = "member";
+          addJoinedOrgId(userId, id);
+        }
+      }));
+
       setOrgDetails(details);
       setAllOrgs(ids.filter(id => details[id]));
+      setMembershipMap(membership);
     } catch(e) {
       showToast("Failed to load organizations.", "error");
     } finally {
@@ -176,6 +202,7 @@ function OrganizationsTab({ ctx }) {
           addJoinedOrgId(userId, orgId);
           showToast(`Joined "${org?.name}"!`);
           setAllOrgs(prev => [...prev]);
+          if (typeof refreshCalendars === "function") refreshCalendars();
         } catch(e) {
           const msg = e.message || "";
           if (msg.includes("1644") || msg.toLowerCase().includes("already exists") || msg.toLowerCase().includes("membership")) {
@@ -205,7 +232,9 @@ function OrganizationsTab({ ctx }) {
         await orgMemApi("LeaveOrganization", { organizationId: Number(orgId) }, sessionId);
         removeOrgId(userId, orgId);
         showToast(`Left "${name}"`);
+        setMembershipMap(prev => { const n = {...prev}; delete n[orgId]; return n; });
         setAllOrgs(prev => [...prev]);
+        if (typeof refreshCalendars === "function") refreshCalendars();
       } catch(e) {
         showToast(e.message || "Failed to leave.", "error");
       } finally {
@@ -242,12 +271,12 @@ function OrganizationsTab({ ctx }) {
     .filter(id => {
       const d = orgDetails[id];
       if (!d) return false;
-      if (subTab === "mine") return isOrgJoined(userId, id);
+      if (subTab === "mine") return !!membershipMap[id] || isOrgJoined(userId, id);
       const q = search.toLowerCase();
       return !q || d.name?.toLowerCase().includes(q) || d.description?.toLowerCase().includes(q);
     });
 
-  const myOrgCount = allOrgs.filter(id => isOrgJoined(userId, id)).length;
+  const myOrgCount = allOrgs.filter(id => !!membershipMap[id] || isOrgJoined(userId, id)).length;
 
   return (
   <div>
@@ -311,8 +340,8 @@ function OrganizationsTab({ ctx }) {
           {filteredOrgs.map(id => {
             const org = orgDetails[id];
             if (!org) return null;
-            const joined  = isOrgJoined(userId, id);
-            const owned   = isOrgOwned(userId, id);
+            const joined  = !!membershipMap[id] || isOrgJoined(userId, id);
+            const owned   = membershipMap[id] === "owner" || isOrgOwned(userId, id);
             const col     = orgColor(id);
             const initials = orgInitials(org.name);
             const isJoining  = joinLoading  === id;

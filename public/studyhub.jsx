@@ -24,9 +24,12 @@ const COURSE_BASE        = "/organizations.v2.OrganizationService";
 const COURSE_MEM_BASE    = "/organizations.v2.OrganizationMembershipService";
 const COURSE_CAL_BASE    = "/organizations.v2.OrganizationCalendarService";
 
+const COURSE_ROLE_BASE   = "/organizations.v2.OrganizationMemberRoleService";
+
 const courseApi       = (method, body, sid) => apiCall(`${COURSE_BASE}/${method}`,       body, sid);
 const courseMemApi    = (method, body, sid) => apiCall(`${COURSE_MEM_BASE}/${method}`,    body, sid);
 const courseCalApi    = (method, body, sid) => apiCall(`${COURSE_CAL_BASE}/${method}`,    body, sid);
+const courseRoleApi   = (method, body, sid) => apiCall(`${COURSE_ROLE_BASE}/${method}`,   body, sid);
 
 // ─── AUDIT LOG ────────────────────────────────────────────────────────────────
 function loadCourseAuditLog(courseId) {
@@ -103,10 +106,11 @@ function courseInitials(name) {
 // ─── STUDY HUB TAB ────────────────────────────────────────────────────────────
 // Rendered inside app as a standalone page "studyhub"
 function StudyHubTab({ ctx }) {
-  const { sessionId, currentUser, setModal, showToast } = ctx;
+  const { sessionId, currentUser, setModal, showToast, refreshCalendars } = ctx;
 
   const [allCourses,    setAllCourses]    = React.useState([]);
   const [courseDetails, setCourseDetails] = React.useState({});
+  const [membershipMap, setMembershipMap] = React.useState({});  // id → "owner" | "member" | null
   const [loading,       setLoading]       = React.useState(true);
   const [joinLoading,   setJoinLoading]   = React.useState(null);
   const [leaveLoading,  setLeaveLoading]  = React.useState(null);
@@ -123,12 +127,16 @@ function StudyHubTab({ ctx }) {
     return () => { delete window.__refreshCourses; };
   }, []);
 
-  // ── Fetch all course IDs then details
+  // ── Fetch all course IDs then details + server-side membership/role
   async function loadCourses() {
     setLoading(true);
     try {
-      const res = await courseApi("GetOrganizations", {}, sessionId);
-      const ids = (res.organizationIds || []).map(String);
+      const [allRes, userRes] = await Promise.all([
+        courseApi("GetOrganizations", {}, sessionId),
+        courseApi("GetUserOrganizations", {}, sessionId),
+      ]);
+      const ids        = (allRes.organizationIds  || []).map(String);
+      const myIds      = new Set((userRes.organizationIds || []).map(String));
 
       const details = {};
       await Promise.allSettled(ids.map(async (id) => {
@@ -150,8 +158,24 @@ function StudyHubTab({ ctx }) {
         } catch(e) {}
       }));
 
+      // Fetch role from server for each course the user belongs to
+      const membership = {};
+      await Promise.allSettled([...myIds].filter(id => details[id]).map(async (id) => {
+        try {
+          const r = await courseRoleApi("GetMemberRole", { organizationId: Number(id), memberUserId: userId }, sessionId);
+          const role = (r.role || "").toLowerCase();
+          membership[id] = role === "owner" ? "owner" : "member";
+          if (role === "owner") addOwnedCourseId(userId, id);
+          else addJoinedCourseId(userId, id);
+        } catch(e) {
+          membership[id] = "member";
+          addJoinedCourseId(userId, id);
+        }
+      }));
+
       setCourseDetails(details);
       setAllCourses(ids.filter(id => details[id]));
+      setMembershipMap(membership);
     } catch(e) {
       showToast("Failed to load courses.", "error");
     } finally {
@@ -175,6 +199,7 @@ function StudyHubTab({ ctx }) {
           addCourseAuditEntry(courseId, { name: currentUser.name || currentUser.email, action: "joined" });
           showToast(`Joined "${course?.name}"!`);
           setAllCourses(prev => [...prev]);
+          if (typeof refreshCalendars === "function") refreshCalendars();
         } catch(e) {
           const msg = e.message || "";
           if (msg.includes("1644") || msg.toLowerCase().includes("already exists") || msg.toLowerCase().includes("membership")) {
@@ -206,7 +231,9 @@ function StudyHubTab({ ctx }) {
           removeCourseId(userId, courseId);
           addCourseAuditEntry(courseId, { name: currentUser.name || currentUser.email, action: "left" });
           showToast(`Left "${name}"`);
+          setMembershipMap(prev => { const n = {...prev}; delete n[courseId]; return n; });
           setAllCourses(prev => [...prev]);
+          if (typeof refreshCalendars === "function") refreshCalendars();
         } catch(e) {
           showToast(e.message || "Failed to leave.", "error");
         } finally {
@@ -242,14 +269,14 @@ function StudyHubTab({ ctx }) {
   const filteredCourses = allCourses.filter(id => {
     const d = courseDetails[id];
     if (!d) return false;
-    if (subTab === "mine") return isCourseJoined(userId, id);
+    if (subTab === "mine") return !!membershipMap[id] || isCourseJoined(userId, id);
     const q = search.toLowerCase();
     const matchesSearch = !q || d.name?.toLowerCase().includes(q) || d.description?.toLowerCase().includes(q) || d.genre?.toLowerCase().includes(q);
     const matchesGenre  = genreFilter === "All" || d.genre === genreFilter;
     return matchesSearch && matchesGenre;
   });
 
-  const myCourseCount = allCourses.filter(id => isCourseJoined(userId, id)).length;
+  const myCourseCount = allCourses.filter(id => !!membershipMap[id] || isCourseJoined(userId, id)).length;
 
   return (
     <div>
@@ -323,8 +350,8 @@ function StudyHubTab({ ctx }) {
           {filteredCourses.map(id => {
             const course    = courseDetails[id];
             if (!course) return null;
-            const joined    = isCourseJoined(userId, id);
-            const owned     = isCourseOwned(userId, id);
+            const joined    = !!membershipMap[id] || isCourseJoined(userId, id);
+            const owned     = membershipMap[id] === "owner" || isCourseOwned(userId, id);
             const col       = courseColor(id);
             const initials  = courseInitials(course.name);
             const gc        = genreColor(course.genre);
