@@ -24,12 +24,29 @@ function CalendarPage({ ctx }) {
   const [visibleOrgCalIds, setVisibleOrgCalIds] = React.useState(null); // null = all visible
 
   const allCals     = myCalendars();
-  // Personal/joined calendars — not surfaced via an org
+  // Personal/owned calendars — not surfaced via an org
   const cals        = allCals.filter(c => !c.isOrgShared);
-  // Org-shared calendars (tagged by fetchAllCalendars)
+  // Org-shared calendars (tagged with orgId + orgName by fetchAllCalendars)
   const orgCals     = allCals.filter(c => c.isOrgShared);
 
-  // Initialise visibleOrgCalIds to all org cal IDs whenever orgCals changes
+  // Build a map of orgId → { orgId, orgName, calIds[], color }
+  // One entry per distinct org; color = first calendar's color for the pill.
+  const orgGroupMap = {};
+  orgCals.forEach(c => {
+    const key = c.orgId || `__noorg__${c.id}`;
+    if (!orgGroupMap[key]) {
+      orgGroupMap[key] = {
+        orgId:   c.orgId  || key,
+        orgName: c.orgName || c.name,
+        calIds:  [],
+        color:   c.color,
+      };
+    }
+    orgGroupMap[key].calIds.push(c.id);
+  });
+  const orgGroups = Object.values(orgGroupMap); // one item per org
+
+  // visibleOrgCalIds tracks individual cal IDs (unchanged semantics internally)
   const orgCalIds   = orgCals.map(c => c.id);
   const visibleOrgIds = visibleOrgCalIds !== null
     ? visibleOrgCalIds.filter(id => orgCalIds.includes(id))
@@ -97,28 +114,34 @@ function CalendarPage({ ctx }) {
           </div>
         );
       })}
-      {/* Sub-feature: Org Calendars Filter — one pill per org-shared calendar */}
-      {orgCals.length > 0 && (<>
+      {/* Sub-feature: Org Calendars Filter — one pill per org (toggles all its shared cals) */}
+      {orgGroups.length > 0 && (<>
         <div style={{ width:1, height:16, background:"var(--border)", flexShrink:0, margin:"0 2px" }} />
-        {orgCals.map(c => {
-          const active = visibleOrgIds.includes(c.id);
+        {orgGroups.map(group => {
+          // Org pill is "active" when ALL of the org's calendars are visible
+          const active = group.calIds.every(id => visibleOrgIds.includes(id));
           return (
-            <div key={c.id}
+            <div key={group.orgId}
               onClick={() => setVisibleOrgCalIds(prev => {
                 const current = prev !== null ? prev : orgCalIds;
-                return current.includes(c.id)
-                  ? current.filter(id => id !== c.id)
-                  : [...current, c.id];
+                if (active) {
+                  // deactivate: remove all this org's cal IDs
+                  return current.filter(id => !group.calIds.includes(id));
+                } else {
+                  // activate: add all this org's cal IDs (union)
+                  const s = new Set([...current, ...group.calIds]);
+                  return [...s];
+                }
               })}
-              title={`Org shared: ${c.name}`}
+              title={`Organization: ${group.orgName}`}
               style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:20,
                 background: active ? "rgba(255,255,255,0.06)" : "transparent",
-                border: `1.5px solid ${active ? c.color : "var(--border)"}`,
+                border: `1.5px solid ${active ? group.color : "var(--border)"}`,
                 cursor:"pointer", flexShrink:0 }}>
               <span style={{ fontSize:9, lineHeight:1, opacity: active ? 1 : 0.4 }}>🏢</span>
-              <span style={{ width:7, height:7, borderRadius:"50%", background: active ? c.color : "var(--text3)" }} />
+              <span style={{ width:7, height:7, borderRadius:"50%", background: active ? group.color : "var(--text3)" }} />
               <span style={{ fontSize:11, fontWeight:500, color: active ? "var(--text)" : "var(--text3)" }}>
-                {c.name}
+                {group.orgName}
               </span>
             </div>
           );
